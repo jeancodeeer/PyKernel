@@ -101,7 +101,7 @@ It is not a daily-driver OS. It is a computer you can **read**: the parts textbo
 | **pygame-compatible API** | `Surface`, `Rect`, `Color`, `display`, `draw`, `event`, `key`, `mouse`, `time`, `font`, `image` (BMP, PNG), `transform`, `sprite`, `mixer`. Pixels drawn by a small C module. Ctrl+Q posts `QUIT` (there is no window to close). |
 | **Threads & tasks** | Preemptive kernel threads behind the standard `_thread` module; generator tasks stepped by the timer; `kill` and Ctrl-C per thread, with disk writes protected from being cut in half. |
 | **Storage** | IDE/ATA disk driver, FAT filesystem at `/disk` (readable on any other computer), `/disk/autoexec.py` at boot, `/disk/lib` on the import path. |
-| **JeanCode** *(needs a host bridge)* | `jeancode` opens [JeanCode](https://github.com/jeancodeeer/JeanCode), the author's AI chat client, full screen. The kernel has no network card yet, so requests leave through the second serial port to a small script on the host that makes the HTTPS call — see [05](#05--how-it-works). |
+| **JeanCode** *(needs a host bridge)* | `jeancode` opens [JeanCode](https://github.com/jeancodeeer/JeanCode), my AI chat client, full screen. The kernel has no network card yet, so requests leave through the second serial port to a small script on the host that makes the HTTPS call — see [05](#05--how-it-works). |
 
 <br>
 

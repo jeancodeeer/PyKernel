@@ -101,7 +101,7 @@ No es un sistema para el día a día. Es un ordenador que se puede **leer**: lo 
 | **API compatible con pygame** | `Surface`, `Rect`, `Color`, `display`, `draw`, `event`, `key`, `mouse`, `time`, `font`, `image` (BMP, PNG), `transform`, `sprite`, `mixer`. Los píxeles los dibuja un pequeño módulo en C. Ctrl+Q envía `QUIT` (no hay ventana que cerrar). |
 | **Hilos y tareas** | Hilos del kernel con desalojo detrás del módulo estándar `_thread`; tareas con generadores que avanza el temporizador; `kill` y Ctrl-C por hilo, sin que una escritura al disco quede a medias. |
 | **Almacenamiento** | Driver de disco IDE/ATA, sistema de archivos FAT en `/disk` (legible en cualquier otro ordenador), `/disk/autoexec.py` al arrancar, `/disk/lib` en la ruta de importación. |
-| **JeanCode** *(necesita un puente en el anfitrión)* | `jeancode` abre [JeanCode](https://github.com/jeancodeeer/JeanCode), el cliente de chat con IA del mismo autor, a pantalla completa. El kernel aún no tiene tarjeta de red, así que las peticiones salen por el segundo puerto serie hacia un script pequeño en el anfitrión que hace la llamada HTTPS; ver [05](#05--cómo-funciona). |
+| **JeanCode** *(necesita un puente en el anfitrión)* | `jeancode` abre [JeanCode](https://github.com/jeancodeeer/JeanCode), mi cliente de chat con IA, a pantalla completa. El kernel aún no tiene tarjeta de red, así que las peticiones salen por el segundo puerto serie hacia un script pequeño en el anfitrión que hace la llamada HTTPS; ver [05](#05--cómo-funciona). |
 
 <br>
 
