@@ -16,4 +16,4 @@
 #   shell     the commands available at the >>> prompt
 #   boot      brings all of the above up, in order
 
-VERSION = "0.1"
+VERSION = "0.1.1"
