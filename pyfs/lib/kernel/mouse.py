@@ -13,6 +13,8 @@ IRQ = 12
 x = y = 0
 buttons = 0
 bounds = (640, 480)
+speed = 1.0                # pointer speed (Settings): 0.5 slower ... 2.0 faster
+left_handed = False        # swap the left and right buttons
 listener = None          # fn(dx, dy, buttons)
 present = False
 _packet = []
@@ -58,8 +60,26 @@ def _config_locked(update):
     outb(0x60, cfg)
 
 
+def move(dx, dy, new_buttons, absolute=False):
+    """Any pointing device (PS/2 here, USB in usb.py) reports movement here
+    (absolute: a tablet or touch screen, which the speed setting must not scale)."""
+    global x, y, buttons, present
+    present = True
+    if speed != 1.0 and not absolute:
+        dx, dy = int(round(dx * speed)), int(round(dy * speed))
+    if left_handed:                       # bit 0 = left, bit 1 = right
+        new_buttons = (new_buttons & ~3) | ((new_buttons & 1) << 1) | ((new_buttons & 2) >> 1)
+    x = max(0, min(bounds[0] - 1, x + dx))
+    y = max(0, min(bounds[1] - 1, y + dy))
+    buttons = new_buttons
+    if listener is not None:
+        try:
+            listener(dx, dy, buttons)
+        except Exception:
+            pass
+
+
 def _on_irq(vector):
-    global x, y, buttons
     while True:
         data = _kernel.irq_read(vector)
         if not data:
@@ -78,20 +98,16 @@ def _on_irq(vector):
                 dx -= 256
             if flags & 0x20:
                 dy -= 256
-            dy = -dy                     # the mouse counts up; the screen counts down
-            x = max(0, min(bounds[0] - 1, x + dx))
-            y = max(0, min(bounds[1] - 1, y + dy))
-            buttons = flags & 7
-            if listener is not None:
-                try:
-                    listener(dx, dy, buttons)
-                except Exception:
-                    pass
+            move(dx, -dy, flags & 7)     # the mouse counts up; the screen counts down
 
 
 def init():
     """Find and switch on the mouse. Returns True if there is one."""
     global present
+    from kernel.arch import ARM
+    if ARM:                          # no PS/2: a USB mouse (kernel/usb.py) moves this one
+        present = False
+        return False
     vector = pic.vector(IRQ)
     # mouse bytes: output buffer full (bit 0) and from the mouse (bit 5)
     _kernel.irq_fifo(vector, 0x64, 0x21, 0x21, 0x60)

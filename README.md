@@ -174,6 +174,23 @@ python tools/test.py           # 89 headless checks in QEMU: keys, screen, disk,
 python tools/iso.py            # build/pykernel.iso, bootable from CD or USB
 ```
 
+**ARM64** (UEFI machines: QEMU `virt`, ARM servers, Raspberry Pi 4/5 with UEFI firmware):
+add `rustup target add aarch64-unknown-none aarch64-unknown-uefi` and
+`sudo apt install gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-system-arm qemu-efi-aarch64`.
+
+```
+python tools/build.py --arch aarch64   # build/aarch64/kernel.elf + BOOTAA64.EFI (boot/aarch64-efi)
+python tools/iso.py --arch aarch64     # build/pykernel-arm64.iso (UEFI)
+tools/run_arm64.sh                     # boot it in QEMU
+```
+
+On ARM64 the Rust layer is `rust/arm64` (UEFI hand-off, MMU, GICv2, generic
+timer, PL011, PSCI). PCI configuration and I/O BARs are kept working, so
+the PC drivers run unchanged. Machine differences live in
+`pyfs/lib/kernel/arch.py`: the screen is UEFI's framebuffer and input is USB.
+MicroPython has no ARM64 native emitter, so `@micropython.viper` functions
+run their C versions from `mpy/modfast.c`.
+
 Editing Python needs no compile: change `pyfs/` and run again. Start reading at [CONTRIBUTING.md](CONTRIBUTING.md), which has a short tour of the source.
 
 <br>

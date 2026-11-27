@@ -38,6 +38,12 @@ CP437 = {
     0xD2: 0x4F, 0xD9: 0x55, 0xC2: 0x41, 0xCA: 0x45, 0xCE: 0x49, 0xD4: 0x4F, 0xDB: 0x55,
     0xB4: 0x27, 0xA8: 0x22, 0x20AC: 0xEE, 0x2018: 0x27, 0x2019: 0x27, 0x201C: 0x22,
     0x201D: 0x22, 0x2013: 0x2D, 0x2014: 0x2D, 0x2026: 0x2E,
+    # symbols the VGA font draws in its first 32 glyphs, and look-alikes
+    0x2022: 0x07, 0x25CF: 0x07, 0x2219: 0xF9, 0x25A0: 0xFE, 0x25AA: 0xFE, 0x2192: 0x1A, 0x2190: 0x1B,
+    0x2191: 0x18, 0x2193: 0x19, 0x25B6: 0x10, 0x25C0: 0x11, 0x25B2: 0x1E, 0x25BC: 0x1F, 0x266A: 0x0D,
+    0x2713: 0xFB, 0x221A: 0xFB, 0xA9: 0x63, 0xAE: 0x52, 0x2122: 0x54, 0x00D7: 0x78, 0x2032: 0x27,
+    0x2033: 0x22, 0x201E: 0x22, 0x201A: 0x2C, 0x2039: 0x3C, 0x203A: 0x3E, 0x2010: 0x2D, 0x2011: 0x2D,
+    0x2212: 0x2D, 0x00AD: 0x2D, 0x2009: 0x20, 0x200A: 0x20, 0x2002: 0x20, 0x2003: 0x20, 0x202F: 0x20,
 }
 _FROM_CP437 = {}
 for _u, _b in CP437.items():
@@ -375,8 +381,111 @@ class Console:
         return rows
 
 
+# ---- ARM64 (and any machine without VGA text mode): the same 80x25 screen,
+# kept in RAM and drawn on the UEFI framebuffer with an 8x16 font ----
+
+VGA_RGB = ((0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170), (170, 85, 0),
+           (170, 170, 170), (85, 85, 85), (85, 85, 255), (85, 255, 85), (85, 255, 255), (255, 85, 85),
+           (255, 85, 255), (255, 255, 85), (255, 255, 255))
+
+
+class FBConsole(Console):
+    def __init__(self, fb_addr, width, height, pitch, bgr=True):
+        self._cells = bytearray(ROWS * ROW_BYTES)       # what Console writes (char, attribute)
+        self._shown = bytearray(ROWS * ROW_BYTES)       # what is on the screen
+        self._pix = uctypes.bytearray_at(fb_addr, pitch * height)
+        self._pitch, self._w, self._h = pitch, width, height
+        self._x0 = max(0, (width - COLS * 8) // 2) * 4
+        self._y0 = max(0, (height - ROWS * 16) // 2)
+        self._bgr = bgr
+        try:
+            with open("/share/console8x16.bin", "rb") as f:
+                self._font = f.read()
+        except OSError:
+            self._font = bytes(4096)
+        self._rows = {}                                  # (fg, bg) -> 256 pixel rows of 8 pixels
+        self._painting = False
+        self._blank_screen()
+        Console.__init__(self, uctypes.addressof(self._cells))
+
+    def _blank_screen(self):
+        row = b"\x00" * self._pitch
+        for y in range(self._h):
+            self._pix[y * self._pitch:(y + 1) * self._pitch] = row
+        self._shown[:] = b"\x00" * len(self._shown)
+
+    def _colours(self, attr):
+        key = attr
+        table = self._rows.get(key)
+        if table is None:
+            def px(c):
+                r, g, b = VGA_RGB[c]
+                return bytes((b, g, r, 0)) if self._bgr else bytes((r, g, b, 0))
+            fg, bg = px(attr & 15), px(attr >> 4)
+            table = [b"".join(fg if bits & (0x80 >> i) else bg for i in range(8)) for bits in range(256)]
+            if len(self._rows) > 64:
+                self._rows.clear()
+            self._rows[key] = table
+        return table
+
+    def _cell(self, col, row, ch, attr):
+        table, font, pix, pitch = self._colours(attr), self._font, self._pix, self._pitch
+        g = ch * 16
+        o = (self._y0 + row * 16) * pitch + self._x0 + col * 32
+        for y in range(16):
+            pix[o:o + 32] = table[font[g + y]]
+            o += pitch
+
+    def render(self):
+        """Draw the cells that changed since last time."""
+        if self._screen is not None or self._painting:   # graphics own the screen
+            return
+        self._painting = True
+        try:
+            cells, shown = self._cells, self._shown
+            # a scroll by one row: move the pixels instead of drawing 2000 cells
+            if cells[0:(ROWS - 1) * ROW_BYTES] == shown[ROW_BYTES:] and cells != shown:
+                top = self._y0 * self._pitch
+                band = 16 * self._pitch
+                pix = self._pix
+                pix[top:top + (ROWS - 1) * band] = pix[top + band:top + ROWS * band]
+                shown[0:(ROWS - 1) * ROW_BYTES] = shown[ROW_BYTES:]
+                shown[(ROWS - 1) * ROW_BYTES:] = b"\x00" * ROW_BYTES
+            for row in range(ROWS):
+                a = row * ROW_BYTES
+                if cells[a:a + ROW_BYTES] == shown[a:a + ROW_BYTES]:
+                    continue
+                for col in range(COLS):
+                    i = a + col * 2
+                    if cells[i] != shown[i] or cells[i + 1] != shown[i + 1]:
+                        self._cell(col, row, cells[i], cells[i + 1])
+                shown[a:a + ROW_BYTES] = cells[a:a + ROW_BYTES]
+            # the cursor: a line under its cell
+            if self._screen is None and 0 <= self.y < ROWS:
+                x = min(self.x, COLS - 1)
+                o = (self._y0 + self.y * 16 + 14) * self._pitch + self._x0 + x * 32
+                self._pix[o:o + 32] = b"\xaa\xaa\xaa\x00" * 8
+                shown[self.y * ROW_BYTES + x * 2 + 1] ^= 0xFF      # redraw that cell next time
+        finally:
+            self._painting = False
+
+    def _cursor(self):
+        self.render()
+
+    def show_cursor(self, on=True):
+        pass
+
+    def attach(self):
+        if self._screen is not None:
+            self._blank_screen()
+        Console.attach(self)
+
+
 def _bright_backgrounds():
     """Turn the VGA blink bit into a bright-background bit (16 background colours)."""
+    from kernel.arch import ARM
+    if ARM:
+        return
     inb(0x3DA)                                # reset the attribute controller flip-flop
     outb(0x3C0, 0x30)                         # register 0x10, keep the palette enabled
     mode = inb(0x3C1)
@@ -388,7 +497,17 @@ def _bright_backgrounds():
 def install():
     """Create the console and route all VM output through it."""
     global current
-    current = Console()
+    from kernel.arch import ARM, info
+    if ARM:
+        if info("fb_addr"):
+            current = FBConsole(info("fb_addr"), info("fb_width"), info("fb_height"), info("fb_pitch"),
+                                info("fb_format") == 1)
+        else:                                   # no screen: the serial port only
+            current = Console(uctypes.addressof(bytearray(ROWS * ROW_BYTES)))
+            current._cursor = lambda: None
+            current.show_cursor = lambda on=True: None
+    else:
+        current = Console()
     _kernel.stdout_hook(current.write)
     return current
 

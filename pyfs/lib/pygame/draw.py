@@ -33,6 +33,21 @@ def rect(surface, color, rect, width=0, border_radius=0, border_top_left_radius=
                            (r.right - 2 * rad, r.bottom - 2 * rad)):
                 _gfx.ellipse(b, w, h, cx, cy, 2 * rad, 2 * rad, c, 0)
             return r.clip(surface.get_rect())
+        # an outline with round corners: four straight edges and four corner rings
+        _gfx.fill(b, w, h, r.x + rad, r.y, r.w - 2 * rad, width, c)
+        _gfx.fill(b, w, h, r.x + rad, r.bottom - width, r.w - 2 * rad, width, c)
+        _gfx.fill(b, w, h, r.x, r.y + rad, width, r.h - 2 * rad, c)
+        _gfx.fill(b, w, h, r.right - width, r.y + rad, width, r.h - 2 * rad, c)
+        corners = ((r.x, r.y, 0, 0), (r.right - rad, r.y, rad, 0),
+                   (r.x, r.bottom - rad, 0, rad), (r.right - rad, r.bottom - rad, rad, rad))
+        from pygame.surface import Surface
+        from pygame.constants import SRCALPHA
+        ring = Surface((2 * rad, 2 * rad), SRCALPHA)
+        ring.fill((0, 0, 0, 0))
+        _gfx.ellipse(ring._buf, 2 * rad, 2 * rad, 0, 0, 2 * rad, 2 * rad, c, width)
+        for x, y, sx, sy in corners:                 # copy one quarter of the ring to each corner
+            _gfx.blit(b, w, h, x, y, ring._buf, 2 * rad, 2 * rad, sx, sy, rad, rad, 2, 0, 255)
+        return r.clip(surface.get_rect())
     if width <= 0:
         _gfx.fill(b, w, h, r.x, r.y, r.w, r.h, c)
     else:
