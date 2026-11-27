@@ -82,9 +82,14 @@ class Command:
 
 
 def command(summary, usage=""):
+    """Register a console command. The operating system on top of the
+    kernel (SnakeyOS) adds its own commands this way from /etc/init.d."""
     def wrap(fn):
         cmd = Command(fn, summary, usage)
         _commands[cmd.name] = cmd
+        if "__all__" in globals() and cmd.name not in __all__:
+            __all__.append(cmd.name)        # registered after start-up: export it too
+            globals()[cmd.name] = cmd       # MicroPython's import * copies module names, not __all__
         return cmd
     return wrap
 
@@ -486,18 +491,282 @@ def ver():
 
 @command("restart the machine (Ctrl-D restarts only the Python world)")
 def reboot():
-    _kernel.outb(0x64, 0xFE)
+    from kernel import acpi
+    acpi.reset()
 
 
-@command("power off (QEMU / ACPI PM1a at 0x604)")
+@command("power off (ACPI S5 from the firmware tables)")
 def poweroff():
-    _kernel.outw(0x604, 0x2000)
+    from kernel import acpi
+    acpi.poweroff()
     print("power-off not supported here; halting")
     _kernel.irq_disable()
     _kernel.hlt()
 
 
+@command("firmware tables: CPUs, interrupt controllers, power registers")
+def acpi():
+    from kernel import acpi as a
+    if not a.tables:
+        a.init()
+    print(a.summary())
+
+
+@command("local APIC, I/O APIC and HPET registers")
+def apic():
+    from kernel import apic as a
+    print(a.summary())
+
+
+@command("network card, address and counters")
+def ifconfig():
+    from kernel import net
+    print(net.summary())
+
+
+@command("send ICMP echo requests", "ping('10.0.2.2')   ping('example.com', 4)")
+def ping(host=None, count=4):
+    from kernel import net
+    if host is None:
+        print("usage: ping('host')")
+        return
+    if net.nic is None or not net.ip:
+        net.up()
+    addr = net.ntoa(net.resolve(host))
+    print("PING %s (%s): 32 data bytes" % (host, addr))
+    got = []
+    for seq in range(1, count + 1):
+        rtt = net.ping(addr, seq)
+        if rtt is None:
+            print("request %d timed out" % seq)
+        else:
+            got.append(rtt)
+            print("reply from %s: seq=%d time=%d ms" % (addr, seq, rtt))
+    print("%d sent, %d received%s" % (count, len(got), ", avg %d ms" % (sum(got) // len(got)) if got else ""))
+
+
+@command("open TCP connections and listening ports")
+def netstat():
+    from kernel import net
+    print(net.connections() or "no sockets")
+
+
+@command("look a host name up in DNS", "nslookup('example.com')")
+def nslookup(name=None):
+    from kernel import net
+    if name is None:
+        print("usage: nslookup('name')")
+        return
+    if net.nic is None or not net.ip:
+        net.up()
+    print("%s -> %s" % (name, net.ntoa(net.resolve(name))))
+
+
+@command("download a URL to a file (HTTP and HTTPS)", "wget('https://example.com/')   wget(url, '/disk/page.html')")
+def wget(url=None, path=None):
+    if url is None:
+        print("usage: wget('http://host/path', 'file')")
+        return
+    from urllib import request
+    import time
+    t = time.ticks_ms()
+    r = request.urlopen(url)
+    data = r.read()
+    if path is None:
+        name = url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+        path = name if "." in name and "/" not in name else "index.html"
+    with open(path, "wb") as f:
+        f.write(data)
+    ms = max(1, time.ticks_ms() - t)
+    print("%s: %d bytes in %d ms (%d KiB/s) -> %s" % (r.status, len(data), ms, len(data) * 1000 // ms >> 10, path))
+
+
+@command("print what a URL returns", "curl('http://10.0.2.2:8000/')")
+def curl(url=None, text=None):
+    if url is None:
+        print("usage: curl('http://host/path')")
+        return
+    from urllib import request
+    print(request.urlopen(url).read().decode("utf-8", "replace"))
+
+
+@command("processes: PID, parent, owner, state, command line")
+def procs():
+    from kernel import proc
+    print(proc.listing())
+
+
+@command("start a program as a new process", "start('/bin/hello.py', 'arg1')   start('top')")
+def start(program=None, *args):
+    from kernel import proc
+    if program is None:
+        print("usage: start('/path/program.py', args...)")
+        return
+    pid = proc.spawn(program, [program] + [str(a) for a in args])
+    print("started pid", pid)
+
+
+@command("send a signal to a process", "pkill(5)   pkill(5, 9)   (15 TERM, 9 KILL, 2 INT, 19 STOP, 18 CONT)")
+def pkill(pid=None, sig=15):
+    from kernel import proc
+    if pid is None:
+        print("usage: pkill(pid, signal=15)")
+        return
+    proc.kill(pid, sig)
+
+
+@command("who you are logged in as")
+def whoami():
+    from kernel import users
+    print(users.whoami())
+
+
+@command("create a user account (root only)", "useradd('ana', 'secret')")
+def useradd(name=None, password=""):
+    from kernel import users
+    if name is None:
+        print("usage: useradd('name', 'password')")
+        return
+    users.require_root()
+    print("user %s created, uid %d" % (name, users.useradd(name, password)))
+
+
+@command("change a password", "passwd('ana', 'new secret')")
+def passwd(name=None, password=None):
+    from kernel import users
+    name = name or users.whoami()
+    if name != users.whoami():
+        users.require_root()
+    if password is None:
+        from kernel import lineedit
+        password = input("new password for %s: " % name)
+    users.passwd(name, password)
+    print("password updated")
+
+
+@command("switch user", "su('ana')   su('root')")
+def su(name="root", password=None):
+    from kernel import users
+    if password is None and users.accounts().get(name, {}).get("hash") and not users.is_root():
+        password = input("password: ")
+    if users.is_root():
+        users.accounts()[name]                      # root may become anyone
+        a = users.accounts()[name]
+        from kernel import proc
+        p = proc.current()
+        p.uid = a["uid"]
+        p.env.update(USER=name, HOME=a["home"])
+        users.current_uid = a["uid"]
+    else:
+        users.login(name, password or "")
+    print("now", name)
+
+
+@command("boot services: list, or service('name', 'start'|'stop'|'restart')", "services   service('web', 'restart')")
+def services():
+    from kernel import services as sv
+    sv.discover()
+    print(sv.status())
+
+
+@command("start, stop or restart a boot service", "service('web', 'stop')")
+def service(name=None, action="status"):
+    from kernel import services as sv
+    sv.discover()
+    if name is None:
+        print(sv.status())
+        return
+    getattr(sv, action)(name) if action != "status" else print(sv.status())
+
+
+@command("packages: pkg('install', name), pkg('remove', name), pkg('list'), pkg('search', text)",
+         "pkg('install', 'pystone')   pkg('install', 'github:user/repo')")
+def pkg(action="list", name=None):
+    from kernel import pkg as p
+    if action == "install":
+        for f in p.install(name):
+            print("  +", f)
+    elif action == "remove":
+        for f in p.remove(name):
+            print("  -", f)
+    elif action == "search":
+        for n, v, d in p.search(name or ""):
+            print("%-24s %-8s %s" % (n, v, d[:40]))
+    else:
+        for n, e in sorted(p.installed().items()):
+            print("%-24s %-8s %s" % (n, e["version"], e["source"]))
+
+
+@command("CPU cores: list them, or cpus('start') to wake the others", "cpus   cpus('start')")
+def cpus(action=None):
+    from kernel import smp
+    if action == "start":
+        print("woke %d core(s)" % smp.start_aps())
+    print(smp.summary())
+
+
+@command("serve a folder over HTTP in the background", "serve('/disk/www', 8080)")
+def serve(root="/", port=80):
+    from http import server
+    server.serve(root, port)
+    from kernel import net
+    print("serving %s at http://%s:%d/" % (root, net.ntoa(net.ip), port))
+
+
+@command("set the clock from the network (NTP)", "ntpdate   ntpdate('time.google.com')")
+def ntpdate(server=None):
+    from kernel import ntp
+    delta = ntp.sync([server] if server else None)
+    import time
+    print("clock corrected by %+d s: %04d-%02d-%02d %02d:%02d:%02d UTC" % ((delta,) + time.gmtime()[:6]))
+
+
+@command("devices and the driver that handles each one")
+def lsdrv():
+    from kernel import drivers
+    for where, ids, cls, drv in drivers.table():
+        print("  %s  %s  %-10s %s" % (where, ids, cls, ("%-11s %s" % (drv, drivers.WHAT.get(drv, ""))) if drv else "-"))
+    for where, what, drv in drivers.legacy():
+        print("  %-21s %-10s %-11s %s" % (where, what, drv, drivers.WHAT.get(drv, "")))
+    try:
+        from kernel import usb
+        for d in usb.devices:
+            print("  usb       ", d)
+    except Exception:
+        pass
+
+
+@command("play a tone, a melody or a WAV file", "beep   beep(440, 500)   play('/share/sounds/arranque.wav')")
+def beep(freq=880, ms=150):
+    from kernel import sound
+    if not sound.card and not sound.init():
+        print("no sound card (QEMU: -device AC97)")
+        return
+    sound.beep(freq, ms)
+
+
+@command("play a WAV file on the sound card", "play('/share/sounds/arranque.wav')")
+def play(path=None):
+    from kernel import sound
+    if path is None:
+        print("usage: play('file.wav')")
+        return
+    if not sound.card and not sound.init():
+        print("no sound card (QEMU: -device AC97)")
+        return
+    sound.play_wav(path)
+
+
+@command("mounted filesystems")
+def mounts():
+    print(open("/proc/mounts").read(), end="")
+
+
 def cpu_name():
+    from kernel.arch import ARM
+    if ARM:
+        from kernel import arch
+        return arch.cpu_name()
     if _kernel.cpuid(0x80000000)[0] < 0x80000004:
         return "x86_64"
     raw = b"".join(reg.to_bytes(4, "little") for leaf in (0x80000002, 0x80000003, 0x80000004) for reg in _kernel.cpuid(leaf))

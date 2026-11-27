@@ -22,6 +22,8 @@ from pygame.rect import Rect, FRect
 from pygame.color import Color
 from pygame.surface import Surface, error
 from pygame import display, draw, event, font, image, key, mixer, mouse, sprite, time, transform
+from pygame import math
+from pygame.math import Vector2, Vector3
 from pygame import constants, locals
 
 class version:
