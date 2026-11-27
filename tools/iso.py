@@ -1,8 +1,8 @@
 """Make a bootable CD/USB image (GRUB) for running SnakeyOS on a real PC.
 
-    python tools/iso.py            # -> build/pykernel.iso (build/snakeyos.iso with SnakeyOS's pyos/ next to pyfs/)
+    python tools/iso.py            # -> build/snakeyos.iso (PyKernel + SnakeyOS)
     python tools/iso.py --boot     # ...and boot it in QEMU to check
-    python tools/iso.py --arch aarch64   # -> build/pykernel-arm64.iso (UEFI, ARM64)
+    python tools/iso.py --arch aarch64   # -> build/snakeyos-arm64.iso (UEFI, ARM64)
 
 The ARM64 image is a UEFI one: BOOTAA64.EFI (boot/aarch64-efi) with
 kernel.elf and pyfs.img on a FAT boot partition (El Torito and, for USB
@@ -49,7 +49,7 @@ def build_iso() -> Path:
     (tree / "boot" / "grub").mkdir(parents=True)
     shutil.copy(kernel, tree / "boot" / "kernel.bin")
     shutil.copy(ROOT / "build" / "pyfs.img", tree / "boot" / "pyfs.img")
-    kernel_only = bool(os.environ.get("PYKERNEL_ONLY")) or not (ROOT / "pyos").is_dir()
+    kernel_only = bool(os.environ.get("PYKERNEL_ONLY"))
     title = "PyKernel" if kernel_only else "SnakeyOS (PyKernel)"
     (tree / "boot" / "grub" / "grub.cfg").write_text(GRUB_CFG % (title, title), newline="\n")
     iso = ROOT / "build" / ("pykernel.iso" if kernel_only else "snakeyos.iso")
@@ -81,8 +81,7 @@ def build_iso_arm64() -> Path:
     run("mcopy", "-i", str(efi), str(loader), "::/EFI/BOOT/BOOTAA64.EFI")
     run("mcopy", "-i", str(efi), str(kernel), "::/snakeyos/kernel.elf")
     run("mcopy", "-i", str(efi), str(ROOT / "build" / "pyfs.img"), "::/snakeyos/pyfs.img")
-    kernel_only = bool(os.environ.get("PYKERNEL_ONLY")) or not (ROOT / "pyos").is_dir()
-    iso = ROOT / "build" / ("pykernel-arm64.iso" if kernel_only else "snakeyos-arm64.iso")
+    iso = ROOT / "build" / "snakeyos-arm64.iso"
     run("xorriso", "-as", "mkisofs", "-o", str(iso), "-R", "-J", "-V", "SNAKEYOS_ARM64",
         "-e", "efi.img", "-no-emul-boot", "-append_partition", "2", "0xef", str(efi), str(tree))
     print(f"{iso.name}: {iso.stat().st_size >> 10} KiB")
